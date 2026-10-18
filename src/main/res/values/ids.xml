@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="zyrox_banner_view" type="id" />
+    <item name="zyrox_native_ad" type="id" />
+    <item name="zyrox_shimmer" type="id" />
+    <item name="zyrox_load_token" type="id" />
+</resources>

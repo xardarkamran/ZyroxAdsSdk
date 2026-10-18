@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zyrox_ad_background">#FFFFFF</color>
+    <color name="zyrox_ad_headline">#1C1C1C</color>
+    <color name="zyrox_ad_body">#8A8A8A</color>
+    <color name="zyrox_ad_cta">#2F6FED</color>
+    <color name="zyrox_ad_cta_text">#FFFFFF</color>
+    <color name="zyrox_ad_badge">#2F6FED</color>
+    <color name="zyrox_ad_badge_text">#FFFFFF</color>
+    <color name="zyrox_shimmer">#E6E6E6</color>
+    <color name="zyrox_shimmer_strong">#D5D5D5</color>
+    <color name="zyrox_dialog_text">#1C1C1C</color>
+</resources>
