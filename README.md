@@ -11,7 +11,7 @@ Add JitPack, then the dependency.
 ```gradle
 maven { url 'https://jitpack.io' }
 
-implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.0'
+implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.1'
 ```
 
 Call `AdsSdk.init` only after the ads consent form has finished.
@@ -110,6 +110,16 @@ NativeAds.load(
     style = NativeStyle.LARGE_MEDIA
 )
 ```
+
+To load on one screen and display on a later screen:
+
+```kotlin
+NativeAds.preload(this, nativeId, NativeStyle.MEDIUM_MEDIA)
+
+NativeAds.showPreloaded(this, container, nativeId, NativeStyle.MEDIUM_MEDIA)
+```
+
+`showPreloaded` shows that ad only when the ad unit id and style match. It does not send a new request. If the preload is still running, the container shows a shimmer and then the ad.
 
 `NativeStyle`:
 

@@ -1,6 +1,8 @@
 package com.fixton.zyroxadssdk
 
 import android.app.Activity
+import android.content.Context
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -27,6 +29,125 @@ import com.google.android.gms.ads.nativead.NativeAdView
  * Call [destroy] from the screen's onDestroy.
  */
 object NativeAds {
+
+    private const val EXPIRY_MS = 60 * 60 * 1000L
+
+    private var cachedAd: NativeAd? = null
+    private var cachedUnitId: String = ""
+    private var cachedStyle: NativeStyle? = null
+    private var cachedAtMs = 0L
+    private var preloading = false
+    private var preloadToken = 0
+    private val preloadCallbacks = mutableListOf<(Boolean) -> Unit>()
+    private var showCallback: NativeCallback = object : NativeCallback {}
+
+    /**
+     * Loads a native ad and keeps it until [showPreloaded].
+     * Call this on an earlier screen so the next screen only displays the ad.
+     */
+    fun preload(
+        context: Context,
+        adUnitId: String,
+        style: NativeStyle,
+        onLoaded: (Boolean) -> Unit = {}
+    ) {
+        if (!AdRequestGuard.canRequest(context, adUnitId)) {
+            onLoaded(false)
+            return
+        }
+        if (freshCached(adUnitId, style) != null) {
+            onLoaded(true)
+            return
+        }
+        if (preloading && cachedUnitId == adUnitId && cachedStyle == style) {
+            preloadCallbacks.add(onLoaded)
+            return
+        }
+        cachedAd?.destroy()
+        cachedAd = null
+        if (preloading) dispatchPreload(false)
+        preloadCallbacks.add(onLoaded)
+        cachedUnitId = adUnitId
+        cachedStyle = style
+        val token = ++preloadToken
+        preloading = true
+        buildLoader(context.applicationContext, adUnitId, style) { nativeAd ->
+            if (token != preloadToken) {
+                nativeAd.destroy()
+                return@buildLoader
+            }
+            cachedAd?.destroy()
+            cachedAd = nativeAd
+            cachedAtMs = SystemClock.elapsedRealtime()
+            preloading = false
+            dispatchPreload(true)
+        }.withAdListener(object : AdListener() {
+            override fun onAdFailedToLoad(loadAdError: LoadAdError) {
+                if (token != preloadToken) return
+                preloading = false
+                cachedAd = null
+                dispatchPreload(false)
+            }
+
+            override fun onAdClicked() {
+                showCallback.onClicked()
+            }
+
+            override fun onAdImpression() {
+                AdsSdk.onImpression("native")
+                showCallback.onImpression()
+            }
+        }).build().loadAd(AdRequest.Builder().build())
+    }
+
+    /**
+     * Displays the ad from [preload]. No new request is sent.
+     * If the preload is still running, the container waits and then shows it.
+     */
+    fun showPreloaded(
+        activity: Activity,
+        container: ViewGroup,
+        adUnitId: String,
+        style: NativeStyle,
+        callback: NativeCallback = object : NativeCallback {}
+    ) {
+        destroy(container)
+        if (!activity.isAlive()) {
+            callback.onFailed("Activity is not available")
+            return
+        }
+        showCallback = callback
+        val ready = freshCached(adUnitId, style)
+        if (ready != null) {
+            cachedAd = null
+            present(activity, container, ready, style, callback)
+            return
+        }
+        if (!preloading || cachedUnitId != adUnitId || cachedStyle != style) {
+            container.visibility = View.GONE
+            callback.onFailed("Native ad is not loaded")
+            return
+        }
+        container.visibility = View.VISIBLE
+        val shimmer = activity.layoutInflater.inflate(shimmerLayout(style), container, false)
+        container.addView(shimmer)
+        container.setTag(R.id.zyrox_shimmer, shimmer)
+        val loadToken = Any()
+        container.setTag(R.id.zyrox_load_token, loadToken)
+        preloadCallbacks.add { loaded ->
+            if (container.getTag(R.id.zyrox_load_token) !== loadToken) return@add
+            removeShimmer(container)
+            val ad = freshCached(adUnitId, style)
+            if (!loaded || ad == null || !activity.isAlive()) {
+                destroy(container)
+                container.visibility = View.GONE
+                callback.onFailed("Native ad failed to load")
+                return@add
+            }
+            cachedAd = null
+            present(activity, container, ad, style, callback)
+        }
+    }
 
     fun load(
         activity: Activity,
@@ -106,6 +227,62 @@ object NativeAds {
         container.setTag(R.id.zyrox_shimmer, null)
         container.setTag(R.id.zyrox_load_token, null)
         container.removeAllViews()
+    }
+
+    private fun present(
+        activity: Activity,
+        container: ViewGroup,
+        nativeAd: NativeAd,
+        style: NativeStyle,
+        callback: NativeCallback
+    ) {
+        val adView = activity.layoutInflater.inflate(adLayout(style), container, false) as NativeAdView
+        bind(nativeAd, adView)
+        removeShimmer(container)
+        container.removeAllViews()
+        container.addView(adView)
+        container.setTag(R.id.zyrox_native_ad, nativeAd)
+        container.visibility = View.VISIBLE
+        callback.onLoaded()
+    }
+
+    private fun buildLoader(
+        context: Context,
+        adUnitId: String,
+        style: NativeStyle,
+        onAd: (NativeAd) -> Unit
+    ): AdLoader.Builder {
+        val videoOptions = VideoOptions.Builder()
+            .setStartMuted(true)
+            .setClickToExpandRequested(false)
+            .setCustomControlsRequested(false)
+            .build()
+        val options = NativeAdOptions.Builder()
+            .setVideoOptions(videoOptions)
+            .setRequestMultipleImages(false)
+            .setAdChoicesPlacement(NativeAdOptions.ADCHOICES_TOP_RIGHT)
+            .setMediaAspectRatio(mediaAspect(style))
+            .build()
+        return AdLoader.Builder(context, adUnitId)
+            .forNativeAd(onAd)
+            .withNativeAdOptions(options)
+    }
+
+    private fun freshCached(adUnitId: String, style: NativeStyle): NativeAd? {
+        val current = cachedAd ?: return null
+        if (cachedUnitId != adUnitId || cachedStyle != style) return null
+        if (SystemClock.elapsedRealtime() - cachedAtMs > EXPIRY_MS) {
+            current.destroy()
+            cachedAd = null
+            return null
+        }
+        return current
+    }
+
+    private fun dispatchPreload(loaded: Boolean) {
+        val callbacks = preloadCallbacks.toList()
+        preloadCallbacks.clear()
+        callbacks.forEach { it(loaded) }
     }
 
     private fun bind(nativeAd: NativeAd, adView: NativeAdView) {

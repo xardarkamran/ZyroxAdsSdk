@@ -4,6 +4,9 @@ plugins {
     id("maven-publish")
 }
 
+group = "com.github.xardarkamran"
+version = "1.0.1"
+
 android {
     namespace = "com.fixton.zyroxadssdk"
     compileSdk = 36
