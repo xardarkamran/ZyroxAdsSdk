@@ -7,6 +7,7 @@ import android.util.DisplayMetrics
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.isAlive
 import com.google.ads.mediation.admob.AdMobAdapter
@@ -34,8 +35,15 @@ object BannerAds {
         showShimmer: Boolean = true,
         callback: BannerCallback = object : BannerCallback {}
     ) {
+        val name = "Banner ${type.name}"
+        val logContext = activity.applicationContext
         destroy(container)
-        if (!activity.isAlive() || !AdRequestGuard.canRequest(activity, adUnitId)) {
+        if (!activity.isAlive()) {
+            container.visibility = View.GONE
+            callback.onFailed("Activity is not available")
+            return
+        }
+        if (AdRequestGuard.skipIfBlocked(logContext, name, adUnitId)) {
             container.visibility = View.GONE
             callback.onFailed("Ad request blocked")
             return
@@ -62,6 +70,7 @@ object BannerAds {
             override fun onAdLoaded() {
                 if (container.getTag(R.id.zyrox_banner_view) !== adView) {
                     adView.destroy()
+                    AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
                     return
                 }
                 removeShimmer(container)
@@ -74,12 +83,19 @@ object BannerAds {
                         )
                     )
                 }
+                container.setTag(R.id.zyrox_log_name, name)
+                container.setTag(R.id.zyrox_log_unit, adUnitId)
                 container.visibility = View.VISIBLE
+                AdLog.loaded(logContext, name, adUnitId)
                 callback.onLoaded()
             }
 
             override fun onAdFailedToLoad(adError: LoadAdError) {
-                if (container.getTag(R.id.zyrox_banner_view) !== adView) return
+                if (container.getTag(R.id.zyrox_banner_view) !== adView) {
+                    AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
+                    return
+                }
+                AdLog.failed(logContext, name, adUnitId, adError.message)
                 destroy(container)
                 container.visibility = View.GONE
                 callback.onFailed(adError.message)
@@ -91,9 +107,11 @@ object BannerAds {
 
             override fun onAdImpression() {
                 AdsSdk.onImpression("banner")
+                AdLog.impression(logContext, name, adUnitId)
                 callback.onImpression()
             }
         }
+        AdLog.request(logContext, name, adUnitId)
         adView.loadAd(request(type))
     }
 
@@ -106,8 +124,17 @@ object BannerAds {
     }
 
     fun destroy(container: ViewGroup) {
-        (container.getTag(R.id.zyrox_banner_view) as? AdView)?.destroy()
+        val adView = container.getTag(R.id.zyrox_banner_view) as? AdView
+        val name = container.getTag(R.id.zyrox_log_name) as? String
+        val unitId = container.getTag(R.id.zyrox_log_unit) as? String
+        val wasShowing = adView?.parent != null
+        adView?.destroy()
+        if (wasShowing && !name.isNullOrBlank() && !unitId.isNullOrBlank()) {
+            AdLog.destroyed(container.context, name, unitId)
+        }
         container.setTag(R.id.zyrox_banner_view, null)
+        container.setTag(R.id.zyrox_log_name, null)
+        container.setTag(R.id.zyrox_log_unit, null)
         container.setTag(R.id.zyrox_shimmer, null)
         container.removeAllViews()
     }

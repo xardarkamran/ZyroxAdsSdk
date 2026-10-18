@@ -3,6 +3,7 @@ package com.fixton.zyroxadssdk
 import android.app.Activity
 import android.content.Context
 import android.os.SystemClock
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.InterstitialPresenter
 import com.google.android.gms.ads.AdRequest
@@ -21,6 +22,7 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
  */
 object PreloadedInterstitial {
 
+    private const val NAME = "Interstitial preloaded"
     private const val EXPIRY_MS = 60 * 60 * 1000L
 
     private var ad: InterstitialAd? = null
@@ -33,21 +35,27 @@ object PreloadedInterstitial {
     fun isReady(): Boolean = freshAd() != null
 
     fun load(context: Context, adUnitId: String, onLoaded: (Boolean) -> Unit = {}) {
-        appContext = context.applicationContext
+        val logContext = context.applicationContext
+        appContext = logContext
         this.adUnitId = adUnitId
-        if (!AdRequestGuard.canRequest(context, adUnitId)) {
+        if (AdRequestGuard.skipIfBlocked(logContext, NAME, adUnitId)) {
             onLoaded(false)
             return
         }
         if (freshAd() != null) {
+            AdLog.skipped(logContext, NAME, adUnitId, "already loaded, no new request")
             onLoaded(true)
             return
         }
         pendingLoads.add(onLoaded)
-        if (loading) return
+        if (loading) {
+            AdLog.skipped(logContext, NAME, adUnitId, "already loading, no new request")
+            return
+        }
         loading = true
+        AdLog.request(logContext, NAME, adUnitId)
         InterstitialAd.load(
-            context.applicationContext,
+            logContext,
             adUnitId,
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
@@ -55,12 +63,14 @@ object PreloadedInterstitial {
                     loading = false
                     ad = interstitialAd
                     loadedAtMs = SystemClock.elapsedRealtime()
+                    AdLog.loaded(logContext, NAME, adUnitId)
                     dispatch(true)
                 }
 
                 override fun onAdFailedToLoad(loadAdError: LoadAdError) {
                     loading = false
                     ad = null
+                    AdLog.failed(logContext, NAME, adUnitId, loadAdError.message)
                     dispatch(false)
                 }
             }
@@ -70,12 +80,15 @@ object PreloadedInterstitial {
     fun show(activity: Activity, onDismissed: () -> Unit = {}) {
         val ready = freshAd()
         if (ready == null) {
+            AdLog.skipped(activity, NAME, adUnitId, "not loaded, no request")
             onDismissed()
             return
         }
         InterstitialPresenter.show(
             activity = activity,
             ad = ready,
+            adName = NAME,
+            adUnitId = adUnitId,
             onConsumed = {
                 ad = null
                 loadedAtMs = 0L

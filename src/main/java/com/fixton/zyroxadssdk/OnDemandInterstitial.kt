@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.FullScreenGate
 import com.fixton.zyroxadssdk.internal.ShowingAdDialog
@@ -23,6 +24,8 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
  */
 object OnDemandInterstitial {
 
+    private const val NAME = "Interstitial on-demand"
+
     private val handler = Handler(Looper.getMainLooper())
     private var loading = false
 
@@ -32,26 +35,39 @@ object OnDemandInterstitial {
         onDismissed: () -> Unit = {},
         onFailed: () -> Unit = {}
     ) {
-        if (!activity.isAlive() || loading || FullScreenGate.isShowing) {
+        if (!activity.isAlive()) {
             onFailed()
             return
         }
-        if (!AdRequestGuard.canRequest(activity, adUnitId)) {
+        if (loading) {
+            AdLog.skipped(activity, NAME, adUnitId, "already loading, no new request")
+            onFailed()
+            return
+        }
+        if (FullScreenGate.isShowing) {
+            AdLog.skipped(activity, NAME, adUnitId, "full-screen ad already open, no new request")
+            onFailed()
+            return
+        }
+        if (AdRequestGuard.skipIfBlocked(activity, NAME, adUnitId)) {
             onFailed()
             return
         }
         loading = true
         FullScreenGate.isShowing = true
         val startedAt = SystemClock.elapsedRealtime()
+        val logContext = activity.applicationContext
         if (!ShowingAdDialog.showNow(activity)) {
             loading = false
             FullScreenGate.isShowing = false
+            AdLog.skipped(activity, NAME, adUnitId, "dialog could not open, no request")
             onFailed()
             return
         }
         var delivered = false
+        AdLog.request(logContext, NAME, adUnitId)
         InterstitialAd.load(
-            activity.applicationContext,
+            logContext,
             adUnitId,
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
@@ -64,7 +80,8 @@ object OnDemandInterstitial {
                         delivered = true
                         loading = false
                         ShowingAdDialog.dismiss()
-                        present(activity, interstitialAd, onDismissed, onFailed)
+                        AdLog.loaded(logContext, NAME, adUnitId)
+                        present(activity, interstitialAd, adUnitId, onDismissed, onFailed)
                     }, wait)
                 }
 
@@ -74,6 +91,7 @@ object OnDemandInterstitial {
                     loading = false
                     FullScreenGate.isShowing = false
                     ShowingAdDialog.dismiss()
+                    AdLog.failed(logContext, NAME, adUnitId, loadAdError.message)
                     onFailed()
                 }
             }
@@ -83,11 +101,13 @@ object OnDemandInterstitial {
     private fun present(
         activity: Activity,
         ad: InterstitialAd,
+        adUnitId: String,
         onDismissed: () -> Unit,
         onFailed: () -> Unit
     ) {
         if (!activity.isAlive()) {
             FullScreenGate.isShowing = false
+            AdLog.failed(activity, NAME, adUnitId, "activity closed before show")
             onFailed()
             return
         }
@@ -98,6 +118,7 @@ object OnDemandInterstitial {
                 FullScreenGate.isShowing = true
                 FullScreenGate.skipNextAppOpen = true
                 AdsSdk.onImpression("interstitial")
+                AdLog.impression(activity, NAME, adUnitId)
             }
 
             override fun onAdClicked() {
@@ -116,13 +137,20 @@ object OnDemandInterstitial {
                 if (closed) return
                 closed = true
                 FullScreenGate.isShowing = false
-                if (shown) onDismissed() else onFailed()
+                if (shown) {
+                    AdLog.dismissed(activity, NAME, adUnitId)
+                    onDismissed()
+                } else {
+                    AdLog.failed(activity, NAME, adUnitId, "show failed")
+                    onFailed()
+                }
             }
         }
         try {
             ad.show(activity)
         } catch (_: Exception) {
             FullScreenGate.isShowing = false
+            AdLog.failed(activity, NAME, adUnitId, "show failed")
             onFailed()
         }
     }

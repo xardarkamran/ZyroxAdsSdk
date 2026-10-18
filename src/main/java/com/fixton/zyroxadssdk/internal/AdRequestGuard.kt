@@ -9,9 +9,23 @@ import com.fixton.zyroxadssdk.AdsSdk
 internal object AdRequestGuard {
 
     fun canRequest(context: Context, adUnitId: String): Boolean {
-        if (adUnitId.isBlank()) return false
-        if (!AdsSdk.canRequest()) return false
-        return isOnline(context)
+        return blockReason(context, adUnitId) == null
+    }
+
+    /**
+     * Logs a skipped request in debug and returns true when no request may be sent.
+     */
+    fun skipIfBlocked(context: Context, name: String, adUnitId: String): Boolean {
+        val reason = blockReason(context, adUnitId) ?: return false
+        AdLog.skipped(context, name, adUnitId, "$reason, no request")
+        return true
+    }
+
+    private fun blockReason(context: Context, adUnitId: String): String? {
+        if (adUnitId.isBlank()) return "empty ad unit id"
+        if (!AdsSdk.canRequest()) return "ads disabled"
+        if (!isOnline(context)) return "device offline"
+        return null
     }
 
     private fun isOnline(context: Context): Boolean {

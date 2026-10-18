@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.RatingBar
 import android.widget.TextView
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.isAlive
 import com.google.android.gms.ads.AdListener
@@ -51,18 +52,23 @@ object NativeAds {
         style: NativeStyle,
         onLoaded: (Boolean) -> Unit = {}
     ) {
-        if (!AdRequestGuard.canRequest(context, adUnitId)) {
+        val name = preloadName(style)
+        val logContext = context.applicationContext
+        if (AdRequestGuard.skipIfBlocked(logContext, name, adUnitId)) {
             onLoaded(false)
             return
         }
         if (freshCached(adUnitId, style) != null) {
+            AdLog.skipped(logContext, name, adUnitId, "already loaded, no new request")
             onLoaded(true)
             return
         }
         if (preloading && cachedUnitId == adUnitId && cachedStyle == style) {
             preloadCallbacks.add(onLoaded)
+            AdLog.skipped(logContext, name, adUnitId, "already loading, no new request")
             return
         }
+        val replaced = preloading
         cachedAd?.destroy()
         cachedAd = null
         if (preloading) dispatchPreload(false)
@@ -71,21 +77,33 @@ object NativeAds {
         cachedStyle = style
         val token = ++preloadToken
         preloading = true
-        buildLoader(context.applicationContext, adUnitId, style) { nativeAd ->
+        AdLog.request(
+            logContext,
+            name,
+            adUnitId,
+            if (replaced) "replaced the in-flight request" else ""
+        )
+        buildLoader(logContext, adUnitId, style) { nativeAd ->
             if (token != preloadToken) {
                 nativeAd.destroy()
+                AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
                 return@buildLoader
             }
             cachedAd?.destroy()
             cachedAd = nativeAd
             cachedAtMs = SystemClock.elapsedRealtime()
             preloading = false
+            AdLog.loaded(logContext, name, adUnitId)
             dispatchPreload(true)
         }.withAdListener(object : AdListener() {
             override fun onAdFailedToLoad(loadAdError: LoadAdError) {
-                if (token != preloadToken) return
+                if (token != preloadToken) {
+                    AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
+                    return
+                }
                 preloading = false
                 cachedAd = null
+                AdLog.failed(logContext, name, adUnitId, loadAdError.message)
                 dispatchPreload(false)
             }
 
@@ -95,6 +113,7 @@ object NativeAds {
 
             override fun onAdImpression() {
                 AdsSdk.onImpression("native")
+                AdLog.impression(logContext, name, adUnitId)
                 showCallback.onImpression()
             }
         }).build().loadAd(AdRequest.Builder().build())
@@ -111,6 +130,7 @@ object NativeAds {
         style: NativeStyle,
         callback: NativeCallback = object : NativeCallback {}
     ) {
+        val name = preloadName(style)
         destroy(container)
         if (!activity.isAlive()) {
             callback.onFailed("Activity is not available")
@@ -119,15 +139,18 @@ object NativeAds {
         showCallback = callback
         val ready = freshCached(adUnitId, style)
         if (ready != null) {
+            AdLog.skipped(activity, name, adUnitId, "showing cached ad, no new request")
             cachedAd = null
-            present(activity, container, ready, style, callback)
+            present(activity, container, ready, style, name, adUnitId, callback)
             return
         }
         if (!preloading || cachedUnitId != adUnitId || cachedStyle != style) {
+            AdLog.skipped(activity, name, adUnitId, "not loaded, no new request")
             container.visibility = View.GONE
             callback.onFailed("Native ad is not loaded")
             return
         }
+        AdLog.skipped(activity, name, adUnitId, "waiting for the in-flight preload, no new request")
         container.visibility = View.VISIBLE
         val shimmer = activity.layoutInflater.inflate(shimmerLayout(style), container, false)
         container.addView(shimmer)
@@ -145,7 +168,7 @@ object NativeAds {
                 return@add
             }
             cachedAd = null
-            present(activity, container, ad, style, callback)
+            present(activity, container, ad, style, name, adUnitId, callback)
         }
     }
 
@@ -157,8 +180,15 @@ object NativeAds {
         showShimmer: Boolean = true,
         callback: NativeCallback = object : NativeCallback {}
     ) {
+        val name = loadName(style)
+        val logContext = activity.applicationContext
         destroy(container)
-        if (!activity.isAlive() || !AdRequestGuard.canRequest(activity, adUnitId)) {
+        if (!activity.isAlive()) {
+            container.visibility = View.GONE
+            callback.onFailed("Activity is not available")
+            return
+        }
+        if (AdRequestGuard.skipIfBlocked(logContext, name, adUnitId)) {
             container.visibility = View.GONE
             callback.onFailed("Ad request blocked")
             return
@@ -186,6 +216,7 @@ object NativeAds {
             .forNativeAd { nativeAd ->
                 if (container.getTag(R.id.zyrox_load_token) !== token || !activity.isAlive()) {
                     nativeAd.destroy()
+                    AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
                     return@forNativeAd
                 }
                 val previous = container.getTag(R.id.zyrox_native_ad) as? NativeAd
@@ -196,13 +227,19 @@ object NativeAds {
                 container.removeAllViews()
                 container.addView(adView)
                 container.setTag(R.id.zyrox_native_ad, nativeAd)
+                rememberLog(container, name, adUnitId)
                 container.visibility = View.VISIBLE
+                AdLog.loaded(logContext, name, adUnitId)
                 callback.onLoaded()
             }
             .withNativeAdOptions(options)
             .withAdListener(object : AdListener() {
                 override fun onAdFailedToLoad(loadAdError: LoadAdError) {
-                    if (container.getTag(R.id.zyrox_load_token) !== token) return
+                    if (container.getTag(R.id.zyrox_load_token) !== token) {
+                        AdLog.ignored(logContext, name, adUnitId, "late response, request was replaced")
+                        return
+                    }
+                    AdLog.failed(logContext, name, adUnitId, loadAdError.message)
                     destroy(container)
                     container.visibility = View.GONE
                     callback.onFailed(loadAdError.message)
@@ -214,16 +251,26 @@ object NativeAds {
 
                 override fun onAdImpression() {
                     AdsSdk.onImpression("native")
+                    AdLog.impression(logContext, name, adUnitId)
                     callback.onImpression()
                 }
             })
             .build()
+        AdLog.request(logContext, name, adUnitId)
         loader.loadAd(AdRequest.Builder().build())
     }
 
     fun destroy(container: ViewGroup) {
-        (container.getTag(R.id.zyrox_native_ad) as? NativeAd)?.destroy()
+        val shown = container.getTag(R.id.zyrox_native_ad) as? NativeAd
+        val name = container.getTag(R.id.zyrox_log_name) as? String
+        val unitId = container.getTag(R.id.zyrox_log_unit) as? String
+        shown?.destroy()
+        if (shown != null && !name.isNullOrBlank() && !unitId.isNullOrBlank()) {
+            AdLog.destroyed(container.context, name, unitId)
+        }
         container.setTag(R.id.zyrox_native_ad, null)
+        container.setTag(R.id.zyrox_log_name, null)
+        container.setTag(R.id.zyrox_log_unit, null)
         container.setTag(R.id.zyrox_shimmer, null)
         container.setTag(R.id.zyrox_load_token, null)
         container.removeAllViews()
@@ -234,6 +281,8 @@ object NativeAds {
         container: ViewGroup,
         nativeAd: NativeAd,
         style: NativeStyle,
+        name: String,
+        adUnitId: String,
         callback: NativeCallback
     ) {
         val adView = activity.layoutInflater.inflate(adLayout(style), container, false) as NativeAdView
@@ -242,9 +291,19 @@ object NativeAds {
         container.removeAllViews()
         container.addView(adView)
         container.setTag(R.id.zyrox_native_ad, nativeAd)
+        rememberLog(container, name, adUnitId)
         container.visibility = View.VISIBLE
         callback.onLoaded()
     }
+
+    private fun rememberLog(container: ViewGroup, name: String, unitId: String) {
+        container.setTag(R.id.zyrox_log_name, name)
+        container.setTag(R.id.zyrox_log_unit, unitId)
+    }
+
+    private fun preloadName(style: NativeStyle): String = "Native preload ${style.name}"
+
+    private fun loadName(style: NativeStyle): String = "Native load ${style.name}"
 
     private fun buildLoader(
         context: Context,

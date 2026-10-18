@@ -8,6 +8,7 @@ import android.os.SystemClock
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.FullScreenGate
 import com.fixton.zyroxadssdk.internal.isAlive
@@ -27,6 +28,7 @@ import com.google.android.gms.ads.appopen.AppOpenAd
  */
 object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallbacks {
 
+    private const val NAME = "App open"
     private const val EXPIRY_MS = 4 * 60 * 60 * 1000L
 
     private var application: Application? = null
@@ -39,18 +41,25 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
     private var attached = false
 
     fun load(context: Context, adUnitId: String, onLoaded: (Boolean) -> Unit = {}) {
+        val logContext = context.applicationContext
         this.adUnitId = adUnitId
-        if (!AdRequestGuard.canRequest(context, adUnitId)) {
+        if (AdRequestGuard.skipIfBlocked(logContext, NAME, adUnitId)) {
             onLoaded(false)
             return
         }
-        if (isReady() || loading) {
-            if (isReady()) onLoaded(true)
+        if (isReady()) {
+            AdLog.skipped(logContext, NAME, adUnitId, "already loaded, no new request")
+            onLoaded(true)
+            return
+        }
+        if (loading) {
+            AdLog.skipped(logContext, NAME, adUnitId, "already loading, no new request")
             return
         }
         loading = true
+        AdLog.request(logContext, NAME, adUnitId)
         AppOpenAd.load(
-            context.applicationContext,
+            logContext,
             adUnitId,
             AdRequest.Builder().build(),
             object : AppOpenAd.AppOpenAdLoadCallback() {
@@ -58,12 +67,14 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
                     loading = false
                     ad = appOpenAd
                     loadedAtMs = SystemClock.elapsedRealtime()
+                    AdLog.loaded(logContext, NAME, adUnitId)
                     onLoaded(true)
                 }
 
                 override fun onAdFailedToLoad(loadAdError: LoadAdError) {
                     loading = false
                     ad = null
+                    AdLog.failed(logContext, NAME, adUnitId, loadAdError.message)
                     onLoaded(false)
                 }
             }
@@ -73,6 +84,7 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
     fun show(activity: Activity, onDismissed: () -> Unit = {}) {
         val ready = freshAd()
         if (ready == null || !activity.isAlive() || FullScreenGate.isShowing) {
+            AdLog.skipped(activity, NAME, adUnitId, "not shown, no request")
             onDismissed()
             return
         }
@@ -103,12 +115,19 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
 
     override fun onStart(owner: LifecycleOwner) {
         val activity = currentActivity ?: return
-        if (skipActivities.any { it.isInstance(activity) }) return
-        if (FullScreenGate.skipNextAppOpen) {
-            FullScreenGate.skipNextAppOpen = false
+        if (skipActivities.any { it.isInstance(activity) }) {
+            AdLog.skipped(activity, NAME, adUnitId, "skipped activity, no request")
             return
         }
-        if (FullScreenGate.isShowing) return
+        if (FullScreenGate.skipNextAppOpen) {
+            FullScreenGate.skipNextAppOpen = false
+            AdLog.skipped(activity, NAME, adUnitId, "returning from an ad, no request")
+            return
+        }
+        if (FullScreenGate.isShowing) {
+            AdLog.skipped(activity, NAME, adUnitId, "full-screen ad already open, no request")
+            return
+        }
         show(activity)
     }
 
@@ -120,6 +139,7 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
             override fun onAdShowedFullScreenContent() {
                 FullScreenGate.isShowing = true
                 AdsSdk.onImpression("app_open")
+                AdLog.impression(activity, NAME, adUnitId)
             }
 
             override fun onAdClicked() {
@@ -127,19 +147,24 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
             }
 
             override fun onAdDismissedFullScreenContent() {
-                finish()
+                finish(dismissed = true)
             }
 
             override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                finish()
+                finish(dismissed = false)
             }
 
-            private fun finish() {
+            private fun finish(dismissed: Boolean) {
                 if (closed) return
                 closed = true
                 ad = null
                 loadedAtMs = 0L
                 FullScreenGate.isShowing = false
+                if (dismissed) {
+                    AdLog.dismissed(activity, NAME, adUnitId)
+                } else {
+                    AdLog.failed(activity, NAME, adUnitId, "show failed")
+                }
                 onDismissed()
                 val context = application ?: activity.applicationContext
                 val id = adUnitId
@@ -151,6 +176,7 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
         } catch (_: Exception) {
             ad = null
             FullScreenGate.isShowing = false
+            AdLog.failed(activity, NAME, adUnitId, "show failed")
             onDismissed()
         }
     }

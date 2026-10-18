@@ -3,6 +3,7 @@ package com.fixton.zyroxadssdk
 import android.app.Activity
 import android.content.Context
 import android.os.SystemClock
+import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.InterstitialPresenter
 import com.google.android.gms.ads.AdRequest
@@ -18,6 +19,7 @@ import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
  */
 object LoadAndShowInterstitial {
 
+    private const val NAME = "Interstitial load-and-show"
     private const val EXPIRY_MS = 60 * 60 * 1000L
 
     private var ad: InterstitialAd? = null
@@ -34,42 +36,60 @@ object LoadAndShowInterstitial {
      * A ready ad for a different id is dropped and this id is loaded instead.
      */
     fun load(context: Context, adUnitId: String, onLoaded: (Boolean) -> Unit = {}) {
-        if (!AdRequestGuard.canRequest(context, adUnitId)) {
+        val logContext = context.applicationContext
+        if (AdRequestGuard.skipIfBlocked(logContext, NAME, adUnitId)) {
             onLoaded(false)
             return
         }
         if (freshAd() != null && loadedUnitId == adUnitId) {
+            AdLog.skipped(logContext, NAME, adUnitId, "already loaded, no new request")
             onLoaded(true)
             return
         }
         if (loading && loadedUnitId == adUnitId) {
             pendingLoads.add(onLoaded)
+            AdLog.skipped(logContext, NAME, adUnitId, "already loading, no new request")
             return
         }
+        val replaced = loading
         ad = null
         if (loading) dispatch(false)
         loadedUnitId = adUnitId
         pendingLoads.add(onLoaded)
         val token = ++requestToken
         loading = true
+        AdLog.request(
+            logContext,
+            NAME,
+            adUnitId,
+            if (replaced) "replaced the in-flight request" else ""
+        )
         InterstitialAd.load(
-            context.applicationContext,
+            logContext,
             adUnitId,
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(interstitialAd: InterstitialAd) {
-                    if (token != requestToken) return
+                    if (token != requestToken) {
+                        AdLog.ignored(logContext, NAME, adUnitId, "late response, request was replaced")
+                        return
+                    }
                     loading = false
                     ad = interstitialAd
                     loadedUnitId = adUnitId
                     loadedAtMs = SystemClock.elapsedRealtime()
+                    AdLog.loaded(logContext, NAME, adUnitId)
                     dispatch(true)
                 }
 
                 override fun onAdFailedToLoad(loadAdError: LoadAdError) {
-                    if (token != requestToken) return
+                    if (token != requestToken) {
+                        AdLog.ignored(logContext, NAME, adUnitId, "late response, request was replaced")
+                        return
+                    }
                     loading = false
                     ad = null
+                    AdLog.failed(logContext, NAME, adUnitId, loadAdError.message)
                     dispatch(false)
                 }
             }
@@ -79,12 +99,15 @@ object LoadAndShowInterstitial {
     fun show(activity: Activity, onDismissed: () -> Unit = {}) {
         val ready = freshAd()
         if (ready == null) {
+            AdLog.skipped(activity, NAME, loadedUnitId, "not loaded, no request")
             onDismissed()
             return
         }
         InterstitialPresenter.show(
             activity = activity,
             ad = ready,
+            adName = NAME,
+            adUnitId = loadedUnitId,
             onConsumed = {
                 ad = null
                 loadedUnitId = ""

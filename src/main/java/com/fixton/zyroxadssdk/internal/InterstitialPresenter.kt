@@ -16,12 +16,15 @@ internal object InterstitialPresenter {
     fun show(
         activity: Activity,
         ad: InterstitialAd,
+        adName: String,
+        adUnitId: String,
         onConsumed: () -> Unit,
         onDismissed: () -> Unit,
         onFailed: () -> Unit,
         afterClose: () -> Unit
     ) {
         if (!activity.isAlive() || FullScreenGate.isShowing) {
+            AdLog.skipped(activity, adName, adUnitId, "show skipped, no request")
             onDismissed()
             return
         }
@@ -29,6 +32,7 @@ internal object InterstitialPresenter {
         ShowingAdDialog.show(activity) {
             if (!activity.isAlive()) {
                 FullScreenGate.isShowing = false
+                AdLog.skipped(activity, adName, adUnitId, "activity closed before show, no request")
                 onDismissed()
                 return@show
             }
@@ -39,6 +43,7 @@ internal object InterstitialPresenter {
                     FullScreenGate.isShowing = true
                     FullScreenGate.skipNextAppOpen = true
                     AdsSdk.onImpression("interstitial")
+                    AdLog.impression(activity, adName, adUnitId)
                 }
 
                 override fun onAdClicked() {
@@ -57,6 +62,11 @@ internal object InterstitialPresenter {
                     if (closed) return
                     closed = true
                     FullScreenGate.isShowing = false
+                    if (shown) {
+                        AdLog.dismissed(activity, adName, adUnitId)
+                    } else {
+                        AdLog.failed(activity, adName, adUnitId, "show failed")
+                    }
                     onConsumed()
                     if (shown) {
                         onDismissed()
@@ -70,6 +80,7 @@ internal object InterstitialPresenter {
                 ad.show(activity)
             } catch (_: Exception) {
                 FullScreenGate.isShowing = false
+                AdLog.failed(activity, adName, adUnitId, "show failed")
                 onConsumed()
                 onFailed()
                 afterClose()
