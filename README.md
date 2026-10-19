@@ -11,7 +11,7 @@ Add JitPack, then the dependency.
 ```gradle
 maven { url 'https://jitpack.io' }
 
-implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.2'
+implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.3'
 ```
 
 Call `AdsSdk.init` only after the ads consent form has finished.

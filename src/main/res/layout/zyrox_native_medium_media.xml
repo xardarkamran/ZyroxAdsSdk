@@ -13,9 +13,8 @@
 
         <com.google.android.gms.ads.nativead.MediaView
             android:id="@+id/zyrox_ad_media"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            app:layout_constraintBottom_toBottomOf="parent"
+            android:layout_width="200dp"
+            android:layout_height="140dp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
@@ -23,7 +22,7 @@
             android:id="@+id/zyrox_ad_badge"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="4dp"
             android:background="@drawable/zyrox_ad_badge"
             android:paddingHorizontal="5dp"
             android:paddingVertical="1dp"
@@ -31,54 +30,70 @@
             android:textColor="@color/zyrox_ad_badge_text"
             android:textSize="10sp"
             android:textStyle="bold"
+            app:layout_constraintBottom_toBottomOf="@id/zyrox_ad_headline"
             app:layout_constraintStart_toEndOf="@id/zyrox_ad_media"
-            app:layout_constraintTop_toTopOf="@id/zyrox_ad_media" />
+            app:layout_constraintTop_toTopOf="@id/zyrox_ad_headline" />
 
         <TextView
             android:id="@+id/zyrox_ad_headline"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
             android:ellipsize="end"
             android:maxLines="1"
             android:textColor="@color/zyrox_ad_headline"
             android:textSize="14sp"
             android:textStyle="bold"
-            app:layout_constraintBottom_toBottomOf="@id/zyrox_ad_badge"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@id/zyrox_ad_badge"
-            app:layout_constraintTop_toTopOf="@id/zyrox_ad_badge"
+            app:layout_constraintTop_toTopOf="@id/zyrox_ad_media"
             tools:text="Headline" />
 
         <TextView
             android:id="@+id/zyrox_ad_body"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="4dp"
             android:layout_marginTop="4dp"
+            android:layout_marginEnd="4dp"
             android:ellipsize="end"
             android:maxLines="2"
             android:textColor="@color/zyrox_ad_body"
             android:textSize="12sp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@id/zyrox_ad_media"
-            app:layout_constraintTop_toBottomOf="@id/zyrox_ad_badge"
+            app:layout_constraintTop_toBottomOf="@id/zyrox_ad_headline"
             tools:text="Body" />
 
-        <Button
+        <androidx.constraintlayout.widget.Barrier
+            android:id="@+id/zyrox_ad_content_bottom"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:barrierDirection="bottom"
+            app:constraint_referenced_ids="zyrox_ad_badge,zyrox_ad_headline,zyrox_ad_body" />
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/zyrox_ad_cta"
             android:layout_width="0dp"
-            android:layout_height="36dp"
-            android:layout_marginStart="8dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/zyrox_ad_cta"
             android:backgroundTint="@null"
-            app:backgroundTint="@null"
+            android:gravity="center"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:stateListAnimator="@null"
             android:textAllCaps="false"
             android:textColor="@color/zyrox_ad_cta_text"
-            android:textSize="13sp"
-            app:layout_constraintBottom_toBottomOf="@id/zyrox_ad_media"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            app:backgroundTint="@null"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@id/zyrox_ad_media"
+            app:layout_constraintTop_toBottomOf="@id/zyrox_ad_content_bottom"
             tools:text="Install" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
