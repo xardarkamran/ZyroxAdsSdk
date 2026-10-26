@@ -6,11 +6,13 @@ import android.content.Context
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.fixton.zyroxadssdk.internal.AdLog
 import com.fixton.zyroxadssdk.internal.AdRequestGuard
 import com.fixton.zyroxadssdk.internal.FullScreenGate
+import com.fixton.zyroxadssdk.internal.ShowingAdDialog
 import com.fixton.zyroxadssdk.internal.isAlive
 import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
@@ -20,7 +22,8 @@ import com.google.android.gms.ads.appopen.AppOpenAd
 
 /**
  * App-open ads. [load] and [show] are manual.
- * [attach] loads once and shows when the app returns to the foreground.
+ * [attach] shows one when the app returns to the foreground, preloaded or
+ * requested on demand ([AppOpenMode]).
  *
  * Put the splash activity in [skipActivities]. An app-open ad is not shown
  * while an interstitial is on screen, and it is not shown on the return
@@ -39,6 +42,7 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
     private var currentActivity: Activity? = null
     private var skipActivities: Set<Class<out Activity>> = emptySet()
     private var attached = false
+    private var mode = AppOpenMode.PRELOAD
 
     fun load(context: Context, adUnitId: String, onLoaded: (Boolean) -> Unit = {}) {
         val logContext = context.applicationContext
@@ -93,22 +97,25 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
 
     /**
      * Shows automatically when the process comes to the foreground.
-     * Activities in [skipActivities] never host the ad.
+     * Activities in [skipActivities] never host the ad. [mode] decides
+     * whether the ad is loaded in advance (the default) or on each return.
      */
     fun attach(
         application: Application,
         adUnitId: String,
-        skipActivities: Set<Class<out Activity>> = emptySet()
+        skipActivities: Set<Class<out Activity>> = emptySet(),
+        mode: AppOpenMode = AppOpenMode.PRELOAD
     ) {
         this.application = application
         this.adUnitId = adUnitId
         this.skipActivities = skipActivities
+        this.mode = mode
         if (!attached) {
             attached = true
             application.registerActivityLifecycleCallbacks(this)
             ProcessLifecycleOwner.get().lifecycle.addObserver(this)
         }
-        load(application, adUnitId)
+        if (mode == AppOpenMode.PRELOAD) load(application, adUnitId)
     }
 
     fun isReady(): Boolean = freshAd() != null
@@ -128,7 +135,25 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
             AdLog.skipped(activity, NAME, adUnitId, "full-screen ad already open, no request")
             return
         }
-        show(activity)
+        if (mode == AppOpenMode.ON_DEMAND) showOnDemand(activity) else show(activity)
+    }
+
+    // Requests an ad behind the "Showing ad" screen and shows it once loaded. An ad that is still fresh is shown at
+    // once; a request already running is left to finish without a second screen.
+    private fun showOnDemand(activity: Activity) {
+        val ready = freshAd()
+        if (ready != null) {
+            present(activity, ready) {}
+            return
+        }
+        if (loading || adUnitId.isBlank() || !ShowingAdDialog.showNow(activity)) return
+        load(activity, adUnitId) { loaded ->
+            ShowingAdDialog.dismiss()
+            val fresh = freshAd()
+            // The user may have left again while the ad loaded; it is then kept for the next return.
+            val inFront = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (loaded && fresh != null && inFront && activity.isAlive() && !FullScreenGate.isShowing) present(activity, fresh) {}
+        }
     }
 
     private fun present(activity: Activity, ready: AppOpenAd, onDismissed: () -> Unit) {
@@ -166,6 +191,8 @@ object AppOpenAds : DefaultLifecycleObserver, Application.ActivityLifecycleCallb
                     AdLog.failed(activity, NAME, adUnitId, "show failed")
                 }
                 onDismissed()
+                // On demand, the next ad is requested on the next return instead.
+                if (attached && mode == AppOpenMode.ON_DEMAND) return
                 val context = application ?: activity.applicationContext
                 val id = adUnitId
                 if (id.isNotBlank()) load(context, id)

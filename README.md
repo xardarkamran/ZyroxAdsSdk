@@ -11,7 +11,7 @@ Add JitPack, then the dependency.
 ```gradle
 maven { url 'https://jitpack.io' }
 
-implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.4'
+implementation 'com.github.xardarkamran:ZyroxAdsSdk:1.0.5'
 ```
 
 Call `AdsSdk.init` only after the ads consent form has finished.
@@ -74,9 +74,12 @@ Put the splash activity in `skipActivities`. The ad is not shown while an inters
 AppOpenAds.attach(
     application = this,
     adUnitId = openAppId,
-    skipActivities = setOf(SplashActivity::class.java)
+    skipActivities = setOf(SplashActivity::class.java),
+    mode = AppOpenMode.ON_DEMAND // optional
 )
 ```
+
+`mode` is `AppOpenMode.PRELOAD` when not given: an ad is loaded in advance, and the next one after each is closed, so a return shows it at once. `AppOpenMode.ON_DEMAND` loads nothing in advance: on each return the "Showing ad" screen is shown while an ad is requested, and the ad is shown once it loads (if the user is still in the app).
 
 ## Banner
 
