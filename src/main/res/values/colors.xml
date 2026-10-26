@@ -10,4 +10,5 @@
     <color name="zyrox_shimmer">#E6E6E6</color>
     <color name="zyrox_shimmer_strong">#D5D5D5</color>
     <color name="zyrox_dialog_text">#1C1C1C</color>
+    <color name="zyrox_dialog_scrim">#80000000</color>
 </resources>

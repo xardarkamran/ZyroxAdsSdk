@@ -10,7 +10,8 @@ import com.fixton.zyroxadssdk.R
 
 /**
  * Full-screen notice shown before an interstitial so the ad does not appear
- * on the same frame as the button click.
+ * on the same frame as the button click. The window is translucent: the screen
+ * underneath stays visible behind a dim layer.
  */
 internal object ShowingAdDialog {
 
@@ -26,7 +27,7 @@ internal object ShowingAdDialog {
             onFinished()
             return
         }
-        val created = Dialog(activity, android.R.style.Theme_Light_NoTitleBar_Fullscreen)
+        val created = Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen)
         try {
             created.requestWindowFeature(Window.FEATURE_NO_TITLE)
             created.setCancelable(false)
@@ -55,7 +56,7 @@ internal object ShowingAdDialog {
     fun showNow(activity: Activity): Boolean {
         dismiss()
         if (!activity.isAlive()) return false
-        val created = Dialog(activity, android.R.style.Theme_Light_NoTitleBar_Fullscreen)
+        val created = Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen)
         return try {
             created.requestWindowFeature(Window.FEATURE_NO_TITLE)
             created.setCancelable(false)

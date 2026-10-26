@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.xardarkamran"
-version = "1.0.3"
+version = "1.0.4"
 
 android {
     namespace = "com.fixton.zyroxadssdk"
